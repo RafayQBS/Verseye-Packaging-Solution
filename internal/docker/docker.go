@@ -45,6 +45,7 @@ func RunVersionedContainer(opts RunOptions) error {
 	// Labels
 	args = append(args, "--label", fmt.Sprintf("builder.feature=%s", opts.Feature))
 	args = append(args, "--label", fmt.Sprintf("builder.hash=%s", opts.Hash))
+	args = append(args, "--label", fmt.Sprintf("builder.role=%s", opts.Role))
 	if opts.Version > 0 {
 		args = append(args, "--label", fmt.Sprintf("builder.version=%d", opts.Version))
 	}
@@ -65,4 +66,25 @@ func StopAndRemoveContainer(name string) error {
 	fmt.Printf("Stopping and removing container %s\n", name)
 	exec.Command("docker", "stop", name).Run()
 	return exec.Command("docker", "rm", name).Run()
+}
+
+func StopContainersByFeatureRole(feature, role string) error {
+	filter := fmt.Sprintf("label=builder.feature=%s", feature)
+	if role != "" {
+		filter += fmt.Sprintf(",label=builder.role=%s", role)
+	}
+
+	cmd := exec.Command("docker", "ps", "-a", "-q", "--filter", filter)
+	output, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	ids := strings.Fields(string(output))
+	for _, id := range ids {
+		fmt.Printf("Stopping and removing container %s (feature=%s, role=%s)\n", id, feature, role)
+		exec.Command("docker", "stop", id).Run()
+		exec.Command("docker", "rm", id).Run()
+	}
+	return nil
 }

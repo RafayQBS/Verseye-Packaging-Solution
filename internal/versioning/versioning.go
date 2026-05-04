@@ -37,10 +37,10 @@ func LoadVersions(feature string) ([]VersionRecord, error) {
 	return versions, nil
 }
 
-func AppendVersionRecord(feature string, record VersionRecord) error {
+func AppendVersionRecord(feature string, record VersionRecord) (VersionRecord, error) {
 	versions, err := LoadVersions(feature)
 	if err != nil {
-		return err
+		return record, err
 	}
 
 	record.Version = len(versions) + 1
@@ -48,19 +48,19 @@ func AppendVersionRecord(feature string, record VersionRecord) error {
 
 	data, err := json.MarshalIndent(versions, "", "  ")
 	if err != nil {
-		return err
+		return record, err
 	}
 
 	path := GetVersionsPath(feature)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
+		return record, err
 	}
 
 	tmpPath := path + ".tmp"
 	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return err
+		return record, err
 	}
 
-	return os.Rename(tmpPath, path)
+	return record, os.Rename(tmpPath, path)
 }

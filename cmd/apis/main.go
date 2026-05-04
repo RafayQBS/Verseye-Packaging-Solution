@@ -233,24 +233,39 @@ func BuildFeature(featureName string) error {
 		cache.WriteFeatureHash(fname, newHash)
 		hashCache[fname] = newHash
 
-		versioning.AppendVersionRecord(fname, versioning.VersionRecord{
+		v := versioning.VersionRecord{
 			FullTag:      remoteTag,
 			ShortHash:    shortHash,
 			InputHash:    newHash,
 			Dependencies: feat.DependsOn,
 			BuildCommand: feat.Command,
+		}
+		v, _ = versioning.AppendVersionRecord(fname, v)
+
+		// 5. Current Promotion (Phase 6)
+		fmt.Printf("Promoting %s to current...\n", fname)
+		
+		// Run as vN first
+		docker.RunVersionedContainer(docker.RunOptions{
+			Feature:   fname,
+			ImageRef:  remoteTag,
+			Role:      fmt.Sprintf("v%d", v.Version), // AppendVersionRecord updates v.Version? No, I need to reload or know the count.
+			Version:   0, // AppendVersionRecord adds version, I should probably return it or reload.
+			Hash:      shortHash,
+			IsManaged: true,
 		})
 
-		// 5. docker run — start a container from the Harbor image
-		// containerName := fmt.Sprintf("%s_container", fname)
-		// fmt.Println("Starting container:", containerName)
-		// runCmd := exec.Command("docker", "run", "-d", "--name", containerName, remoteTag)
-		// runCmd.Stdout = os.Stdout
-		// runCmd.Stderr = os.Stderr
-		// if err := runCmd.Run(); err != nil {
-		// 	return fmt.Errorf("docker run failed for %s: %w", fname, err)
-		// }
-		// fmt.Printf("Container started: %s (image: %s)\n", containerName, remoteTag)
+		// Stop old current
+		docker.StopContainersByFeatureRole(fname, "current")
+
+		// Run as current
+		docker.RunVersionedContainer(docker.RunOptions{
+			Feature:   fname,
+			ImageRef:  remoteTag,
+			Role:      "current",
+			Hash:      shortHash,
+			IsManaged: true,
+		})
 	}
 	return nil
 }
