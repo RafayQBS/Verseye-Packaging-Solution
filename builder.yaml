@@ -20,3 +20,9 @@ features:
     image: harbor.qbscocloud.net:30003/verseye-project/feature3
     depends_on:
       - feature1
+
+  dummy:
+    inputs:
+      - features/dummy
+    command: docker build -t dummy .
+    image: harbor.qbscocloud.net:30003/verseye-project/dummy
