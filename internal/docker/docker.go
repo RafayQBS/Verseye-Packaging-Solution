@@ -88,3 +88,54 @@ func StopContainersByFeatureRole(feature, role string) error {
 	}
 	return nil
 }
+
+func GCStaleContainers(feature string, keepN int) error {
+	// List containers for feature, exclude role=current
+	filter := fmt.Sprintf("label=builder.feature=%s", feature)
+	// We'll filter in Go to exclude current role
+	cmd := exec.Command("docker", "ps", "-a", "--filter", filter, "--format", "{{.ID}}|{{.Label \"builder.role\"}}|{{.CreatedAt}}")
+	output, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
+		fmt.Println("No containers found for GC")
+		return nil
+	}
+
+	type contInfo struct {
+		id   string
+		role string
+		created string
+	}
+	var candidates []contInfo
+	for _, line := range lines {
+		parts := strings.Split(line, "|")
+		if len(parts) < 2 {
+			continue
+		}
+		if parts[1] == "current" {
+			continue
+		}
+		candidates = append(candidates, contInfo{id: parts[0], role: parts[1], created: parts[2]})
+	}
+
+	// docker ps -a returns by creation time descending by default
+	// so we just skip the first keepN
+	if len(candidates) <= keepN {
+		fmt.Printf("Keeping all %d non-current containers (limit %d)\n", len(candidates), keepN)
+		return nil
+	}
+
+	toRemove := candidates[keepN:]
+	fmt.Printf("GC: Removing %d stale containers, keeping latest %d\n", len(toRemove), keepN)
+	for _, c := range toRemove {
+		fmt.Printf("GC: Removing %s (role=%s, created=%s)\n", c.id, c.role, c.created)
+		exec.Command("docker", "stop", c.id).Run()
+		exec.Command("docker", "rm", c.id).Run()
+	}
+
+	return nil
+}

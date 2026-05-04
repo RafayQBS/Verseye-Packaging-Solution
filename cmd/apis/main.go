@@ -249,8 +249,8 @@ func BuildFeature(featureName string) error {
 		docker.RunVersionedContainer(docker.RunOptions{
 			Feature:   fname,
 			ImageRef:  remoteTag,
-			Role:      fmt.Sprintf("v%d", v.Version), // AppendVersionRecord updates v.Version? No, I need to reload or know the count.
-			Version:   0, // AppendVersionRecord adds version, I should probably return it or reload.
+			Role:      fmt.Sprintf("v%d", v.Version),
+			Version:   v.Version,
 			Hash:      shortHash,
 			IsManaged: true,
 		})
@@ -263,6 +263,7 @@ func BuildFeature(featureName string) error {
 			Feature:   fname,
 			ImageRef:  remoteTag,
 			Role:      "current",
+			Version:   v.Version,
 			Hash:      shortHash,
 			IsManaged: true,
 		})
@@ -372,7 +373,7 @@ func RunAction(featureName string, version int, tag string) error {
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: builder <command> [args]")
-		fmt.Println("Commands: server, build, versions, run")
+		fmt.Println("Commands: server, build, versions, run, gc")
 		os.Exit(1)
 	}
 
@@ -420,6 +421,19 @@ func main() {
 			os.Exit(1)
 		}
 		if err := RunAction(feature, *version, *tag); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "gc":
+		gcCmd := flag.NewFlagSet("gc", flag.ExitOnError)
+		keep := gcCmd.Int("keep", 5, "Number of versions to keep")
+		gcCmd.Parse(os.Args[2:])
+		feature := gcCmd.Arg(0)
+		if feature == "" {
+			fmt.Println("feature is required")
+			os.Exit(1)
+		}
+		if err := docker.GCStaleContainers(feature, *keep); err != nil {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
