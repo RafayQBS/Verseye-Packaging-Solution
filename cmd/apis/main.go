@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/maisam9060/platform-api/internal/cache"
 	"github.com/maisam9060/platform-api/internal/config"
+	"github.com/maisam9060/platform-api/internal/docker"
 	"github.com/maisam9060/platform-api/internal/versioning"
 	"gopkg.in/yaml.v3"
 )
@@ -286,11 +287,77 @@ func ListVersions(featureName string, last int, asJSON bool) error {
 	return nil
 }
 
+func ResolveVersion(featureName string, version int, tag string) (versioning.VersionRecord, error) {
+	versions, err := versioning.LoadVersions(featureName)
+	if err != nil {
+		return versioning.VersionRecord{}, err
+	}
+
+	if version > 0 {
+		for _, v := range versions {
+			if v.Version == version {
+				return v, nil
+			}
+		}
+		return versioning.VersionRecord{}, fmt.Errorf("version %d not found", version)
+	}
+
+	if tag != "" {
+		for _, v := range versions {
+			if v.ShortHash == tag || v.FullTag == tag {
+				return v, nil
+			}
+		}
+		return versioning.VersionRecord{}, fmt.Errorf("tag/hash %s not found", tag)
+	}
+
+	// Default to current version
+	currentHash, err := cache.ReadFeatureHash(featureName)
+	if err != nil {
+		if len(versions) > 0 {
+			return versions[len(versions)-1], nil
+		}
+		return versioning.VersionRecord{}, fmt.Errorf("no versions found and current hash missing")
+	}
+
+	for _, v := range versions {
+		if v.InputHash == currentHash {
+			return v, nil
+		}
+	}
+
+	if len(versions) > 0 {
+		return versions[len(versions)-1], nil
+	}
+	return versioning.VersionRecord{}, fmt.Errorf("version not found")
+}
+
+func RunAction(featureName string, version int, tag string) error {
+	v, err := ResolveVersion(featureName, version, tag)
+	if err != nil {
+		return err
+	}
+
+	role := "current"
+	if version > 0 || tag != "" {
+		role = fmt.Sprintf("v%d", v.Version)
+	}
+
+	return docker.RunVersionedContainer(docker.RunOptions{
+		Feature:   featureName,
+		ImageRef:  v.FullTag,
+		Role:      role,
+		Version:   v.Version,
+		Hash:      v.ShortHash,
+		IsManaged: true,
+	})
+}
+
 // --- main ---
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: builder <command> [args]")
-		fmt.Println("Commands: server, build, versions")
+		fmt.Println("Commands: server, build, versions, run")
 		os.Exit(1)
 	}
 
@@ -324,6 +391,20 @@ func main() {
 			os.Exit(1)
 		}
 		if err := ListVersions(feature, *last, *asJSON); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "run":
+		runCmd := flag.NewFlagSet("run", flag.ExitOnError)
+		version := runCmd.Int("version", 0, "Version to run")
+		tag := runCmd.String("tag", "", "Tag or hash to run")
+		runCmd.Parse(os.Args[2:])
+		feature := runCmd.Arg(0)
+		if feature == "" {
+			fmt.Println("feature is required")
+			os.Exit(1)
+		}
+		if err := RunAction(feature, *version, *tag); err != nil {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
