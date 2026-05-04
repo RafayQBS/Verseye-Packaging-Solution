@@ -3,12 +3,15 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"text/tabwriter"
 
 	"github.com/gin-gonic/gin"
 	"github.com/maisam9060/platform-api/internal/cache"
@@ -251,8 +254,86 @@ func BuildFeature(featureName string) error {
 	return nil
 }
 
-// --- REST API ---
+// --- CLI Actions ---
+func ListVersions(featureName string, last int, asJSON bool) error {
+	versions, err := versioning.LoadVersions(featureName)
+	if err != nil {
+		return err
+	}
+
+	if last > 0 && len(versions) > last {
+		versions = versions[len(versions)-last:]
+	}
+
+	if asJSON {
+		data, _ := json.MarshalIndent(versions, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	}
+
+	currentHash, _ := cache.ReadFeatureHash(featureName)
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "VER\tTAG\tHASH\tCURRENT")
+	for _, v := range versions {
+		isCurrent := ""
+		if v.InputHash == currentHash {
+			isCurrent = "*"
+		}
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", v.Version, v.FullTag, v.ShortHash, isCurrent)
+	}
+	w.Flush()
+	return nil
+}
+
+// --- main ---
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: builder <command> [args]")
+		fmt.Println("Commands: server, build, versions")
+		os.Exit(1)
+	}
+
+	switch os.Args[1] {
+	case "server":
+		runServer()
+	case "build":
+		buildCmd := flag.NewFlagSet("build", flag.ExitOnError)
+		feature := buildCmd.String("feature", "", "Feature to build")
+		buildCmd.Parse(os.Args[2:])
+		feat := *feature
+		if feat == "" && buildCmd.NArg() > 0 {
+			feat = buildCmd.Arg(0)
+		}
+		if feat == "" {
+			fmt.Println("feature is required")
+			os.Exit(1)
+		}
+		if err := BuildFeature(feat); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "versions":
+		versionsCmd := flag.NewFlagSet("versions", flag.ExitOnError)
+		last := versionsCmd.Int("last", 0, "Show last N versions")
+		asJSON := versionsCmd.Bool("json", false, "Output as JSON")
+		versionsCmd.Parse(os.Args[2:])
+		feature := versionsCmd.Arg(0)
+		if feature == "" {
+			fmt.Println("feature is required")
+			os.Exit(1)
+		}
+		if err := ListVersions(feature, *last, *asJSON); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+	default:
+		fmt.Printf("Unknown command: %s\n", os.Args[1])
+		os.Exit(1)
+	}
+}
+
+func runServer() {
 	r := gin.Default()
 	r.POST("/build", func(c *gin.Context) {
 		var req struct {
