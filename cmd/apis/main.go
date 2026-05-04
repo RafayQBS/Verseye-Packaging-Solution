@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/maisam9060/platform-api/internal/cache"
 	"github.com/maisam9060/platform-api/internal/config"
+	"github.com/maisam9060/platform-api/internal/versioning"
 	"gopkg.in/yaml.v3"
 )
 
@@ -224,9 +225,17 @@ func BuildFeature(featureName string) error {
 		}
 		fmt.Printf("Pushed to Harbor: %s\n", remoteTag)
 
-		// 4. Update cache only after a successful push
+		// 4. Update cache and version history only after a successful push
 		cache.WriteFeatureHash(fname, newHash)
 		hashCache[fname] = newHash
+
+		versioning.AppendVersionRecord(fname, versioning.VersionRecord{
+			FullTag:      remoteTag,
+			ShortHash:    shortHash,
+			InputHash:    newHash,
+			Dependencies: feat.DependsOn,
+			BuildCommand: feat.Command,
+		})
 
 		// 5. docker run — start a container from the Harbor image
 		// containerName := fmt.Sprintf("%s_container", fname)
